@@ -52,11 +52,15 @@ typedef struct _s3{
 	int tMax;
 	int prio;
 	struct _s3 *next;
+} tasks;
+
+typedef struct _s4{
+	tasks* taskList;
 } filaTasks;
 
 int filaID;
 filaTasks *filaT;
-
+sem_t *mutexFila;
 
 int readFile(char* file){
 	FILE *f = fopen(file, "r");
@@ -164,11 +168,27 @@ void taskManager(){
 	}
 	
 	//criacao da fila de tasks
-	sem_wait(&mutex);
-	for(int i = 0; i < sh_mem->slots; i++){
+	
+	if((filaID = shmget(IPC_PRIVATE, sizeof(filaTasks), IPC_CREAT|0776)) < 0){
+		perror("Erro ao criar a memoria partilhada2");
+		cleanup();
+		exit(1);
+	}
+	
+	if((filaT = (filaTasks*) shmat(filaID, NULL, 0)) < 0){
+		perror("Erro ao mapear a memoria partilhada2");
+		cleanup();
+		exit(1);
+	}
+	
+	sem_init(&mutexFila, 0, 1);
+	sem_wait(&mutexFila);
+	task* t = (task*)malloc(sizeof(task));	
+	
+	for(int i = 1; i < sh_mem->slots; i++){
 		
 	}
-	sem_post(&mutex);
+	sem_post(&mutexFila);
 	
 	while(1){
 		fd = open(task_pipe, O_RDONLY);
@@ -324,4 +344,3 @@ int main(){
 	cleanup();	
 	
 }
-
