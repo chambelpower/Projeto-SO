@@ -17,7 +17,7 @@
 int readFile(char* file);
 void print_SHM();
 void systemManager();
-
+void print_SHM2();
 
 pid_t systemManagerPID;
 
@@ -154,11 +154,11 @@ void taskManager(){
 	
 	for(int i = 0; i < totalServers; i++){
 		if(fork() == 0){
-			
+			sem_wait(&mutex);
 			char *name = serverList->name;
 			int a = serverList->capacidade1;
 			int b = serverList->capacidade2;
-			
+			sem_post(&mutex);
 			printf("Edge Server %s\n", name);
 			edgeServer(name, a, b);	
 			exit(0);
@@ -215,6 +215,7 @@ void taskManager(){
 			int n_inst = atoi(strtok(NULL, ";"));
 			int tMax = atoi(strtok(NULL, ";"));
 			insertFila(id, n_inst, tMax);
+			print_SHM2();
 		}
 		close(fd);
 	}
@@ -225,10 +226,12 @@ void insertFila(int id, int n_inst, int tMax){
 	tasks* t = filaT->taskList;
 	while(t != NULL){
 		if(t->id == -1){
+			sem_wait(&mutexFila);
 			t->id = id;
 			t->n_instrucoes = n_inst;
 			t->tMax = tMax;
 			t->prio = 0;
+			sem_post(&mutexFila);
 			printf("Nova tarefa inserida\n");
 			return;
 		}
@@ -245,7 +248,14 @@ void maintenanceManager(){
 	exit(0);
 }
 
-
+void print_SHM2(){
+	printf("SHM2:\n");
+	tasks* t = filaT->taskList;
+	while(t != NULL){
+		printf("ID: %d\n", t->id);
+		t=t->next;
+	}
+}
 
 void print_SHM(){
 	
