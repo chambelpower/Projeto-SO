@@ -211,11 +211,30 @@ void taskManager(){
 		}
 		else{
 			printf("task\n");
-			
+			int id = atoi(strtok(str1, ";"));
+			int n_inst = atoi(strtok(NULL, ";"));
+			int tMax = atoi(strtok(NULL, ";"));
+			insertFila(id, n_inst, tMax);
 		}
 		close(fd);
 	}
 	exit(0);
+}
+
+void insertFila(int id, int n_inst, int tMax){
+	tasks* t = filaT->taskList;
+	while(t != NULL){
+		if(t->id == -1){
+			t->id = id;
+			t->n_instrucoes = n_inst;
+			t->tMax = tMax;
+			t->prio = 0;
+			printf("Nova tarefa inserida\n");
+			return;
+		}
+		t=t->next;
+	}
+	printf("Fila ocupada, tarefa eliminada\n");
 }
 
 void monitor(){
