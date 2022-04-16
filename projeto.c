@@ -14,10 +14,13 @@
 #include <sys/stat.h>
 #include <sys/msg.h>
 #include <signal.h>
+#include <time.h>
 int readFile(char* file);
 void print_SHM();
 void systemManager();
 void print_SHM2();
+void insertFila(int id, int n_inst, int tMax);
+void cleanup();
 
 pid_t systemManagerPID;
 
@@ -229,7 +232,8 @@ void insertFila(int id, int n_inst, int tMax){
 			sem_wait(&mutexFila);
 			t->id = id;
 			t->n_instrucoes = n_inst;
-			t->tMax = tMax;
+			t->tMax = (int)time(NULL) + tMax;
+			printf("TIME: %d\n", t->tMax);
 			t->prio = 0;
 			sem_post(&mutexFila);
 			printf("Nova tarefa inserida\n");
