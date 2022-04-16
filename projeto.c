@@ -183,12 +183,20 @@ void taskManager(){
 	
 	sem_init(&mutexFila, 0, 1);
 	sem_wait(&mutexFila);
-	task* t = (task*)malloc(sizeof(task));	
-	
+	task* t = (task*)malloc(sizeof(task));
+	t->id = -1;// e utilizado -1 quando o espaco na lista nao esta ocupado
+	t->next = NULL;
+	filaT->taskList = t;
 	for(int i = 1; i < sh_mem->slots; i++){
-		
+		task *t1 = (task*)malloc(sizeof(task));
+		t1->id = -i;
+		t1->NULL;
+		t->next = t1;
+		t = t1;
 	}
 	sem_post(&mutexFila);
+
+	print_SHM2();
 	
 	while(1){
 		fd = open(task_pipe, O_RDONLY);
@@ -214,6 +222,15 @@ void monitor(){
 
 void maintenanceManager(){
 	exit(0);
+}
+
+void print_SHM2(){
+	printf("SHM2:\n");
+	tasks* t = filaT->taskList;
+	while(t != NULL){
+		printf("ID: %d\n", t->id);
+		t=t->next;
+	}
 }
 
 void print_SHM(){
