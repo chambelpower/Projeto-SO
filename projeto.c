@@ -211,6 +211,7 @@ void taskManager(){
 		}
 		else{
 			printf("task\n");
+			
 		}
 		close(fd);
 	}
