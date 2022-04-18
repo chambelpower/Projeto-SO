@@ -80,10 +80,7 @@ int checkNumber(char *var){
 	return 1;
 }
 
-void cleanup(){
-	sem_close(logSem);
-	sem_unlink("LOGSEM");
-}
+
 
 int main(){
 	
@@ -93,7 +90,7 @@ int main(){
 		fgets(comando, 100, stdin);
 		if(strcmp(comando, "EXIT\n") == 0){
 			writeNamedPipe("EXIT");
-			cleanup();
+			exit(0);
 		}
 		else if(strcmp(comando, "STATS\n") == 0){
 			writeNamedPipe("STATS");
@@ -120,7 +117,7 @@ int main(){
 				else{
 					char *t1 = strtok(c1, "\n");
 					char t[100] = "WRONG COMMAND => ";
-					strcat(t, c1);
+					strcat(t, t1);
 					logFile(t);
 					printf("Comando invalido\n");
 				}
