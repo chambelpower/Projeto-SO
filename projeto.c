@@ -1,5 +1,7 @@
 //Para compilar gcc -pthread projeto.c -o projeto
 //Comando inicial: offload_simulator config_file.txt
+
+
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -16,6 +18,8 @@
 #include <signal.h>
 #include <time.h>
 #include <pthread.h>
+
+#define NCPU 2
 int readFile(char* file);
 void print_SHM();
 void systemManager();
@@ -29,6 +33,8 @@ typedef struct _s1{
 	char *name;
 	int capacidade1;
 	int capacidade2;
+	char *nivelPerformance;
+	int timeNextTarefa;
 	struct _s1 *next;
 } edge_server;
 
@@ -64,11 +70,23 @@ typedef struct _s4{
 	tasks* taskList;
 } filaTasks;
 
+struct tm* getTime() {
+	time_t now = time(NULL);
+	struct tm *tm_struct = localtime(&now);
+	return tm_struct;
+}
+
 int filaID;
 filaTasks *filaT;
 
 pthread_mutex_t mutexFila = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t scheduler_cs= PTHREAD_COND_INITIALIZER;
+
+void logFile(char msg[100]) {
+	FILE *r = fopen("log.txt", "a");
+	fprintf(r, "%d:%d:%d %s\n", getTime()->tm_hour, getTime()->tm_min, getTime()->tm_sec, msg);
+	fclose(r);
+}
 
 int readFile(char* file){
 	FILE *f = fopen(file, "r");
@@ -148,23 +166,62 @@ int readFile(char* file){
 	return 0;
 }
 
+void *cpu(void *t){
+	int my_id = *((int *)t);
+
+	printf("CPU is READY\n");
+	
+	pthread_exit(NULL);
+}
+
 void edgeServer(char *name, int capMin, int capMax){
 	printf("%s STARTED\n", name);
-	sem_post(serverMutex);
+	logFile(strcat(name, " READY"));
 	
+	int i;
+	int id[NCPU];
+	pthread_t threads[NCPU];
+	
+	for(i = 0; i < NCPU; i++){
+		id[i] = i;
+		pthread_create(&threads[i], NULL, cpu, &id[i]);
+	}
+	sem_post(serverMutex);
+	for(i = 0; i < NCPU; i++){
+		pthread_join(threads[i], NULL);
+  	}
+}
+
+void removeTarefasImpo(){
+
+}
+
+void prioridades(){
+
+}
+
+void ordenar(){
+
 }
 
 void *scheduler(void *t){
 	printf("Starting scheduler\n");
 	while(1){
+		pthread_mutex_lock(&mutexFila);
 		pthread_cond_wait(&scheduler_cs, &mutexFila);
 		printf("RECEBEU SINAL\n");
+		
+		removeTarefasImpo();
+		prioridades();
+		ordenar();
+		pthread_mutex_unlock(&mutexFila);
 		
 	}
 	pthread_exit(NULL);
 }
 
 void taskManager(){
+	logFile("PROCESS TASK_MANAGER CREATED");
 	int fd;
 	char str1[100];
 	
@@ -202,12 +259,14 @@ void taskManager(){
 	//criacao da fila de tasks
 	
 	if((filaID = shmget(IPC_PRIVATE, sizeof(filaTasks), IPC_CREAT|0776)) < 0){
+		logFile("ERROR CREATING SHARED MEMORY");
 		perror("Erro ao criar a memoria partilhada2");
 		cleanup();
 		exit(1);
 	}
 	
 	if((filaT = (filaTasks*) shmat(filaID, NULL, 0)) < 0){
+		logFile("ERROR MAPING SHARED MEMORY");
 		perror("Erro ao mapear a memoria partilhada2");
 		cleanup();
 		exit(1);
@@ -240,9 +299,12 @@ void taskManager(){
 		read(fd, str1, 100);
 		printf("TaskManager read: %s\n", str1);
 		if(strcmp(str1, "EXIT") == 0){
+			logFile("EXIT COMMAND RECEIVED");
+			logFile("SIMULATOR CLOSING");
 			cleanup();
 		}
 		else if(strcmp(str1, "STATS") == 0){
+			logFile("STATS COMMAND RECEIVED");
 			printf("stats\n");
 		}
 		else{
@@ -250,9 +312,11 @@ void taskManager(){
 			int id = atoi(strtok(str1, ";"));
 			int n_inst = atoi(strtok(NULL, ";"));
 			int tMax = atoi(strtok(NULL, ";"));
+			pthread_mutex_lock(&mutexFila);
 			insertFila(id, n_inst, tMax);
 			pthread_cond_signal(&scheduler_cs);
-			print_SHM2();
+			pthread_mutex_unlock(&mutexFila);
+			//print_SHM2();
 		}
 		close(fd);
 	}
@@ -264,26 +328,29 @@ void insertFila(int id, int n_inst, int tMax){
 	tasks* t = filaT->taskList;
 	while(t != NULL){
 		if(t->id == -1){
-			pthread_mutex_lock(&mutexFila);
+			
 			t->id = id;
 			t->n_instrucoes = n_inst;
 			t->tMax = (int)time(NULL) + tMax;
 			printf("TIME: %d\n", t->tMax);
 			t->prio = 0;
-			pthread_mutex_unlock(&mutexFila);
+			logFile("NEW TASK INSERTED");
 			printf("Nova tarefa inserida\n");
 			return;
 		}
 		t=t->next;
 	}
+	logFile("QUEUE FULL => TASK REFUSED");
 	printf("Fila ocupada, tarefa eliminada\n");
 }
 
 void monitor(){
+	logFile("PROCESS MONITOR CREATED");
 	exit(0);
 }
 
 void maintenanceManager(){
+	logFile("PROCESS MAINTENANCE MANAGER CREATED");
 	exit(0);
 }
 
@@ -311,6 +378,26 @@ void print_SHM(){
 	sem_post(mutex);
 }
 
+void sigCleanup(){
+	if((int)systemManagerPID == (int)getpid()){
+	printf("CLEANUP\n");
+	logFile("SIGNAL SIGINT RECEIVED");
+	msgctl(msgID, IPC_RMID, 0);
+	
+	shmctl(shmid, IPC_RMID, 0);
+	
+	sem_close(mutex);
+	sem_unlink("MUTEX");
+	sem_close(serverMutex);
+	sem_unlink("SERVERMUTEX");
+	pthread_mutex_destroy(&mutexFila);
+	pthread_cond_destroy(&scheduler_cs);
+	logFile("SIMULATOR CLOSING");
+	kill(0, SIGTERM);
+	exit(0);
+	}
+}
+
 void cleanup(){
 	printf("CLEANUP\n");
 	msgctl(msgID, IPC_RMID, 0);
@@ -321,6 +408,8 @@ void cleanup(){
 	sem_unlink("MUTEX");
 	sem_close(serverMutex);
 	sem_unlink("SERVERMUTEX");
+	pthread_mutex_destroy(&mutexFila);
+	pthread_cond_destroy(&scheduler_cs);
 	kill(0, SIGTERM);
 	exit(0);
 }
@@ -328,6 +417,7 @@ void cleanup(){
 void stats(){
 	
 	if((int)systemManagerPID == (int)getpid()){
+		logFile("SIGNAL SIGTSTP RECEIVED");
 		printf("Stats: TODO\n");
 	}
 }
@@ -335,20 +425,23 @@ void stats(){
 void systemManager(char *filename){
 	systemManagerPID = getpid();
 	
-	signal(SIGINT, cleanup);
+	signal(SIGINT, sigCleanup);
 	signal(SIGTSTP, stats);
 	
 	FILE *f = fopen("log.txt", "w");
 	fclose(f);
 	
-	printf(" DEBUG: here\n");
+	logFile("OFFLOAD SIMULATOR STARTING");
+	
 	if((shmid = shmget(IPC_PRIVATE, sizeof(shm_struct), IPC_CREAT|0776)) < 0){
+		logFile("ERROR CREATING SHARED MEMORY");
 		perror("Erro ao criar a memoria partilhada");
 		cleanup();
 		exit(1);
 	}
 	
 	if((sh_mem = (shm_struct*) shmat(shmid, NULL, 0)) < 0){
+		logFile("ERROR MAPING SHARED MEMORY");
 		perror("Erro ao mapear a memoria partilhada");
 		cleanup();
 		exit(1);
@@ -361,11 +454,13 @@ void systemManager(char *filename){
 	systemManagerPID = getpid();
 	int a = readFile(filename);
 	if(a == -1){
+		logFile("ERROR READING CONFIG FILE");
 		perror("Erro ao ler o ficheiro de configuracoes");
 		cleanup();
 		exit(1);
 	}
 	if(a == -2){
+		logFile("INVALID CONFIG FILE");
 		perror("Ficheiro de configuracoes invalido");
 		cleanup();
 		exit(1);
