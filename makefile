@@ -1,23 +1,6 @@
 
-FLAGS  = -Wall -g -pthread
-CC     = gcc
-PROG   = project
-OBJS   = project.o
+projeto: projeto.c
+	gcc -Wall -g -pthread projeto.c -o projeto
 
-all:	${PROG}
-
-clean:
-	rm ${OBJS} *~ ${PROG}
-  
-${PROG}:	${OBJS}
-	${CC} ${FLAGS} ${OBJS} -o $@
-
-.c.o:
-	${CC} ${FLAGS} $< -c -o $@
-
-##########################
-
-project.o: project.c
-
-project: project.o
-
+mobile: mobile.c
+	gcc -Wall -g -pthread mobile.c -o mobile	
