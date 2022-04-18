@@ -15,6 +15,7 @@
 #include <sys/msg.h>
 #include <signal.h>
 #include <time.h>
+#include <pthread.h>
 int readFile(char* file);
 void print_SHM();
 void systemManager();
@@ -49,6 +50,7 @@ typedef struct{
 int shmid;
 shm_struct *sh_mem;
 sem_t *mutex;
+sem_t *serverMutex;
 
 typedef struct _s3{
 	int id;
@@ -64,7 +66,9 @@ typedef struct _s4{
 
 int filaID;
 filaTasks *filaT;
-sem_t *mutexFila;
+
+pthread_mutex_t mutexFila = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t scheduler_cs= PTHREAD_COND_INITIALIZER;
 
 int readFile(char* file){
 	FILE *f = fopen(file, "r");
@@ -146,6 +150,18 @@ int readFile(char* file){
 
 void edgeServer(char *name, int capMin, int capMax){
 	printf("%s STARTED\n", name);
+	
+	
+}
+
+void *scheduler(void *t){
+	printf("Starting scheduler\n");
+	while(1){
+		pthread_cond_wait(&scheduler_cs, &mutexFila);
+		printf("RECEBEU SINAL\n");
+		
+	}
+	pthread_exit(NULL);
 }
 
 void taskManager(){
@@ -154,23 +170,35 @@ void taskManager(){
 	
 	int totalServers = sh_mem->nEdgeServers;
 	edge_server* serverList = sh_mem->edgeList;
+	//sem_init(&serverMutex, 0, 1);
+	sem_unlink("SERVERMUTEX");
+	serverMutex = sem_open("SERVERMUTEX", O_CREAT | O_EXCL, 0700, 1);
 	
 	for(int i = 0; i < totalServers; i++){
+		
+		printf("a espera\n");
+		sem_wait(serverMutex);
+		printf("avancou\n");
 		if(fork() == 0){
-			sem_wait(&mutex);
+			
 			char *name = serverList->name;
 			int a = serverList->capacidade1;
 			int b = serverList->capacidade2;
-			sem_post(&mutex);
 			printf("Edge Server %s\n", name);
 			edgeServer(name, a, b);	
+			sem_post(serverMutex);
+			printf("abriu\n");
 			exit(0);
 		}
+		
 		sem_wait(&mutex); //necessario?
 		serverList = serverList->next;
 		sem_post(&mutex); //
 	}
-	
+	printf("DEBUG1\n");
+	sem_wait(serverMutex);//para apenas avancar quando os servers todos tiverem preparados
+	printf("Servers ready\n");
+	sem_post(serverMutex);
 	//criacao da fila de tasks
 	
 	if((filaID = shmget(IPC_PRIVATE, sizeof(filaTasks), IPC_CREAT|0776)) < 0){
@@ -185,8 +213,13 @@ void taskManager(){
 		exit(1);
 	}
 	
-	sem_init(&mutexFila, 0, 1);
-	sem_wait(&mutexFila);
+	int id[1];//para ja apenas a dispatcher
+  	pthread_t thread_id;
+  	
+	pthread_create(&thread_id, NULL, scheduler, NULL);
+	
+	
+	pthread_mutex_lock(&mutexFila);
 	tasks* t = (tasks*)malloc(sizeof(tasks));
 	t->id = -1;// e utilizado -1 quando o espaco na lista nao esta ocupado
 	t->next = NULL;
@@ -198,7 +231,7 @@ void taskManager(){
 		t->next = t1;
 		t = t1;
 	}
-	sem_post(&mutexFila);
+	pthread_mutex_unlock(&mutexFila);
 
 	
 	
@@ -218,10 +251,12 @@ void taskManager(){
 			int n_inst = atoi(strtok(NULL, ";"));
 			int tMax = atoi(strtok(NULL, ";"));
 			insertFila(id, n_inst, tMax);
+			pthread_cond_signal(&scheduler_cs);
 			print_SHM2();
 		}
 		close(fd);
 	}
+	pthread_join(thread_id, NULL);
 	exit(0);
 }
 
@@ -229,13 +264,13 @@ void insertFila(int id, int n_inst, int tMax){
 	tasks* t = filaT->taskList;
 	while(t != NULL){
 		if(t->id == -1){
-			sem_wait(&mutexFila);
+			pthread_mutex_lock(&mutexFila);
 			t->id = id;
 			t->n_instrucoes = n_inst;
 			t->tMax = (int)time(NULL) + tMax;
 			printf("TIME: %d\n", t->tMax);
 			t->prio = 0;
-			sem_post(&mutexFila);
+			pthread_mutex_unlock(&mutexFila);
 			printf("Nova tarefa inserida\n");
 			return;
 		}
@@ -282,7 +317,8 @@ void cleanup(){
 	
 	shmctl(shmid, IPC_RMID, 0);
 	sem_destroy(&mutex);
-	
+	//sem_close(serverMutex);
+	//sem_unlink("SERVERMUTEX");
 	kill(0, SIGTERM);
 	exit(0);
 }
