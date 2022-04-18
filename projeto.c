@@ -77,7 +77,7 @@ int readFile(char* file){
 	}
 	char line[100];
 	int i = 0;
-	sem_wait(&mutex);
+	sem_wait(mutex);
 	
 	
 	while(i<3){
@@ -142,7 +142,7 @@ int readFile(char* file){
 		i++;
 	} 
 	
-	sem_post(&mutex);
+	sem_post(mutex);
 	fclose(f);
 	
 	return 0;
@@ -170,7 +170,7 @@ void taskManager(){
 	
 	int totalServers = sh_mem->nEdgeServers;
 	edge_server* serverList = sh_mem->edgeList;
-	//sem_init(&serverMutex, 0, 1);
+	
 	sem_unlink("SERVERMUTEX");
 	serverMutex = sem_open("SERVERMUTEX", O_CREAT | O_EXCL, 0700, 1);
 	
@@ -191,9 +191,9 @@ void taskManager(){
 			exit(0);
 		}
 		
-		sem_wait(&mutex); //necessario?
+		sem_wait(mutex); //necessario?
 		serverList = serverList->next;
-		sem_post(&mutex); //
+		sem_post(mutex); //
 	}
 	printf("DEBUG1\n");
 	sem_wait(serverMutex);//para apenas avancar quando os servers todos tiverem preparados
@@ -303,12 +303,12 @@ void print_SHM(){
 	printf("MaxWait: %d\n", sh_mem->maxWait);
 	printf("N de EdgeServers: %d\n", sh_mem->nEdgeServers);
 	edge_server* serverList = sh_mem->edgeList;
-	sem_wait(&mutex);
+	sem_wait(mutex);
 	while(serverList != NULL){
 		printf("%s: %d, %d\n", serverList->name, serverList->capacidade1, serverList->capacidade2);
 		serverList = serverList->next;
 	}
-	sem_post(&mutex);
+	sem_post(mutex);
 }
 
 void cleanup(){
@@ -316,9 +316,11 @@ void cleanup(){
 	msgctl(msgID, IPC_RMID, 0);
 	
 	shmctl(shmid, IPC_RMID, 0);
-	sem_destroy(&mutex);
-	//sem_close(serverMutex);
-	//sem_unlink("SERVERMUTEX");
+	
+	sem_close(mutex);
+	sem_unlink("MUTEX");
+	sem_close(serverMutex);
+	sem_unlink("SERVERMUTEX");
 	kill(0, SIGTERM);
 	exit(0);
 }
@@ -352,7 +354,9 @@ void systemManager(char *filename){
 		exit(1);
 	}
 	
-	sem_init(&mutex, 0, 1);
+
+	sem_unlink("MUTEX");
+	mutex = sem_open("MUTEX", O_CREAT | O_EXCL, 0700, 1);
 	//aqui a variavel systemManagerPID fica a 0 por alguma razao
 	systemManagerPID = getpid();
 	int a = readFile(filename);
