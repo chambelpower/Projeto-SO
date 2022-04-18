@@ -1,6 +1,7 @@
 //Para compilar gcc -pthread projeto.c -o projeto
 //Comando inicial: offload_simulator config_file.txt
-
+//Rafael Amaral 2018286090
+//Pedro Bonifácio 2018280935
 
 #include <stdio.h>
 #include <unistd.h>
@@ -57,6 +58,7 @@ int shmid;
 shm_struct *sh_mem;
 sem_t *mutex;
 sem_t *serverMutex;
+sem_t *logSem;
 
 typedef struct _s3{
 	int id;
@@ -83,9 +85,11 @@ pthread_mutex_t mutexFila = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t scheduler_cs= PTHREAD_COND_INITIALIZER;
 
 void logFile(char msg[100]) {
+	sem_wait(logSem);
 	FILE *r = fopen("log.txt", "a");
 	fprintf(r, "%d:%d:%d %s\n", getTime()->tm_hour, getTime()->tm_min, getTime()->tm_sec, msg);
 	fclose(r);
+	sem_post(logSem);
 }
 
 int readFile(char* file){
@@ -392,6 +396,8 @@ void sigCleanup(){
 	sem_unlink("MUTEX");
 	sem_close(serverMutex);
 	sem_unlink("SERVERMUTEX");
+	sem_close(logSem);
+	sem_unlink("LOGSEM");
 	pthread_mutex_destroy(&mutexFila);
 	pthread_cond_destroy(&scheduler_cs);
 	logFile("SIMULATOR CLOSING");
@@ -410,6 +416,8 @@ void cleanup(){
 	sem_unlink("MUTEX");
 	sem_close(serverMutex);
 	sem_unlink("SERVERMUTEX");
+	sem_close(logSem);
+	sem_unlink("LOGSEM");
 	pthread_mutex_destroy(&mutexFila);
 	pthread_cond_destroy(&scheduler_cs);
 	kill(0, SIGTERM);
@@ -449,7 +457,8 @@ void systemManager(char *filename){
 		exit(1);
 	}
 	
-
+	sem_unlink("LOGSEM");
+	logSem = sem_open("LOGSEM", O_CREAT | O_EXCL, 0700, 1);
 	sem_unlink("MUTEX");
 	mutex = sem_open("MUTEX", O_CREAT | O_EXCL, 0700, 1);
 	//aqui a variavel systemManagerPID fica a 0 por alguma razao
