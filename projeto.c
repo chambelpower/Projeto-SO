@@ -224,10 +224,10 @@ void taskManager(){
 	logFile("PROCESS TASK_MANAGER CREATED");
 	int fd;
 	char str1[100];
-	
+	sem_wait(mutex); 
 	int totalServers = sh_mem->nEdgeServers;
 	edge_server* serverList = sh_mem->edgeList;
-	
+	sem_post(mutex); 
 	sem_unlink("SERVERMUTEX");
 	serverMutex = sem_open("SERVERMUTEX", O_CREAT | O_EXCL, 0700, 1);
 	
@@ -237,20 +237,21 @@ void taskManager(){
 		sem_wait(serverMutex);
 		
 		if(fork() == 0){
-			
+			sem_wait(mutex); 
 			char *name = serverList->name;
 			int a = serverList->capacidade1;
 			int b = serverList->capacidade2;
 			printf("Edge Server %s\n", name);
+			sem_post(mutex); 
 			edgeServer(name, a, b);	
 			
 			
 			exit(0);
 		}
 		
-		sem_wait(mutex); //necessario?
+		sem_wait(mutex); 
 		serverList = serverList->next;
-		sem_post(mutex); //
+		sem_post(mutex); 
 	}
 	
 	sem_wait(serverMutex);//para apenas avancar quando os servers todos tiverem preparados
@@ -355,22 +356,23 @@ void maintenanceManager(){
 }
 
 void print_SHM2(){
+	pthread_mutex_lock(&mutexFila);
 	printf("SHM2:\n");
 	tasks* t = filaT->taskList;
 	while(t != NULL){
 		printf("ID: %d\n", t->id);
 		t=t->next;
 	}
+	pthread_mutex_unlock(&mutexFila);
 }
 
 void print_SHM(){
-	
+	sem_wait(mutex);
 	printf("SHM:\n");
 	printf("Slots: %d\n", sh_mem->slots);
 	printf("MaxWait: %d\n", sh_mem->maxWait);
 	printf("N de EdgeServers: %d\n", sh_mem->nEdgeServers);
 	edge_server* serverList = sh_mem->edgeList;
-	sem_wait(mutex);
 	while(serverList != NULL){
 		printf("%s: %d, %d\n", serverList->name, serverList->capacidade1, serverList->capacidade2);
 		serverList = serverList->next;
