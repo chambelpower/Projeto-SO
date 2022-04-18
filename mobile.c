@@ -1,4 +1,6 @@
 //Para compilar gcc mobile.c -o mobile
+//Rafael Amaral 2018286090
+//Pedro Bonifácio 2018280935
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -18,12 +20,14 @@ struct tm* getTime() {
 	struct tm *tm_struct = localtime(&now);
 	return tm_struct;
 }
+sem_t *logSem;
 
 void logFile(char msg[100]) {
-	
+	sem_wait(logSem);
 	FILE *r = fopen("log.txt", "a");
 	fprintf(r, "%d:%d:%d %s\n", getTime()->tm_hour, getTime()->tm_min, getTime()->tm_sec, msg);
 	fclose(r);
+	sem_post(logSem);
 }
 void writeNamedPipe(char *message){
 	char * task_pipe = "TASK_PIPE";
@@ -76,13 +80,20 @@ int checkNumber(char *var){
 	return 1;
 }
 
+void cleanup(){
+	sem_close(logSem);
+	sem_unlink("LOGSEM");
+}
+
 int main(){
+	
+	logSem = sem_open("LOGSEM", O_CREAT, 0700, 1);
 	char comando[100];
 	while(1){
 		fgets(comando, 100, stdin);
 		if(strcmp(comando, "EXIT\n") == 0){
 			writeNamedPipe("EXIT");
-			exit(0);
+			cleanup();
 		}
 		else if(strcmp(comando, "STATS\n") == 0){
 			writeNamedPipe("STATS");
