@@ -9,7 +9,7 @@
 #include <sys/ipc.h>
 #include <sys/wait.h>
 #include <stdlib.h>
-#include <ctype.h>
+#include <ctype.h> 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/msg.h>
@@ -303,6 +303,7 @@ void systemManager(char *filename){
 	FILE *f = fopen("log.txt", "w");
 	fclose(f);
 	
+	printf(" DEBUG: here\n");
 	if((shmid = shmget(IPC_PRIVATE, sizeof(shm_struct), IPC_CREAT|0776)) < 0){
 		perror("Erro ao criar a memoria partilhada");
 		cleanup();
