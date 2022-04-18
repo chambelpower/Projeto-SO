@@ -150,7 +150,7 @@ int readFile(char* file){
 
 void edgeServer(char *name, int capMin, int capMax){
 	printf("%s STARTED\n", name);
-	
+	sem_post(serverMutex);
 	
 }
 
@@ -176,9 +176,9 @@ void taskManager(){
 	
 	for(int i = 0; i < totalServers; i++){
 		
-		printf("a espera\n");
+		
 		sem_wait(serverMutex);
-		printf("avancou\n");
+		
 		if(fork() == 0){
 			
 			char *name = serverList->name;
@@ -186,8 +186,8 @@ void taskManager(){
 			int b = serverList->capacidade2;
 			printf("Edge Server %s\n", name);
 			edgeServer(name, a, b);	
-			sem_post(serverMutex);
-			printf("abriu\n");
+			
+			
 			exit(0);
 		}
 		
@@ -195,7 +195,7 @@ void taskManager(){
 		serverList = serverList->next;
 		sem_post(mutex); //
 	}
-	printf("DEBUG1\n");
+	
 	sem_wait(serverMutex);//para apenas avancar quando os servers todos tiverem preparados
 	printf("Servers ready\n");
 	sem_post(serverMutex);
