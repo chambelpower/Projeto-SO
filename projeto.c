@@ -171,7 +171,7 @@ int readFile(char* file){
 }
 
 void *cpu(void *t){
-	int my_id = *((int *)t);
+	//int my_id = *((int *)t);
 
 	printf("CPU is READY\n");
 	
@@ -277,7 +277,7 @@ void taskManager(){
 		exit(1);
 	}
 	
-	int id[1];//para ja apenas a dispatcher
+	//int id[1];//para ja apenas a dispatcher
   	pthread_t thread_id;
   	
 	pthread_create(&thread_id, NULL, scheduler, NULL);
@@ -396,8 +396,8 @@ void sigCleanup(){
 	sem_unlink("MUTEX");
 	sem_close(serverMutex);
 	sem_unlink("SERVERMUTEX");
-	sem_close(logSem);
-	sem_unlink("LOGSEM");
+	//sem_close(logSem); //da segfault??
+	//sem_unlink("LOGSEM");
 	pthread_mutex_destroy(&mutexFila);
 	pthread_cond_destroy(&scheduler_cs);
 	logFile("SIMULATOR CLOSING");
@@ -416,8 +416,8 @@ void cleanup(){
 	sem_unlink("MUTEX");
 	sem_close(serverMutex);
 	sem_unlink("SERVERMUTEX");
-	sem_close(logSem);
-	sem_unlink("LOGSEM");
+	//sem_close(logSem);
+	//sem_unlink("LOGSEM");
 	pthread_mutex_destroy(&mutexFila);
 	pthread_cond_destroy(&scheduler_cs);
 	kill(0, SIGTERM);
@@ -457,8 +457,7 @@ void systemManager(char *filename){
 		exit(1);
 	}
 	
-	sem_unlink("LOGSEM");
-	logSem = sem_open("LOGSEM", O_CREAT | O_EXCL, 0700, 1);
+	
 	sem_unlink("MUTEX");
 	mutex = sem_open("MUTEX", O_CREAT | O_EXCL, 0700, 1);
 	//aqui a variavel systemManagerPID fica a 0 por alguma razao
@@ -480,7 +479,7 @@ void systemManager(char *filename){
 	print_SHM();
 	
 	
-	int fd;
+	//int fd;
 	if(mkfifo(task_pipe, 0666) == -1){
 		printf("Named pipe already exists or an error ocurred\n");
 	}
@@ -521,6 +520,8 @@ void systemManager(char *filename){
 
 
 int main(){
+	sem_unlink("LOGSEM");
+	logSem = sem_open("LOGSEM", O_CREAT | O_EXCL, 0700, 1);
 	printf("Insira o comando com o nome do ficheiro de config\n");
 	char comando[100];
 	while(1){
