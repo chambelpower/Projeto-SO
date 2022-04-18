@@ -11,7 +11,20 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <time.h>
 
+struct tm* getTime() {
+	time_t now = time(NULL);
+	struct tm *tm_struct = localtime(&now);
+	return tm_struct;
+}
+
+void logFile(char msg[100]) {
+	
+	FILE *r = fopen("log.txt", "a");
+	fprintf(r, "%d:%d:%d %s\n", getTime()->tm_hour, getTime()->tm_min, getTime()->tm_sec, msg);
+	fclose(r);
+}
 void writeNamedPipe(char *message){
 	char * task_pipe = "TASK_PIPE";
 	int fd;
@@ -22,6 +35,7 @@ void writeNamedPipe(char *message){
 		close(fd);
 	}
 	else{
+		logFile("NAMED PIPE ERROR");
 		perror("Named pipe error");
 		exit(0);
 	}	
@@ -47,12 +61,18 @@ void mobileNodes(char *var1,char *var2,char *var3,char *var4){
 }
 
 int checkNumber(char *var){
+	
+	if(var == NULL || var[0] == '\0'){
+		printf("debug\n");
+		return 0;
+	}
 	int l = strlen(var);
 	for(int i = 0; i<l; i++){
 		if(!isdigit(var[i])){
 			return 0;
 		}
 	}
+	
 	return 1;
 }
 
@@ -68,6 +88,8 @@ int main(){
 			writeNamedPipe("STATS");
 		}
 		else{
+			char c1[100];
+			strcpy(c1, comando);
 			char *token = strtok(comando, "\n");
 			const char s[2] = " ";
 			char *check_comando = strtok(token, s);
@@ -78,18 +100,25 @@ int main(){
 				char *intervalo = strtok(NULL, s);
 				char *mipr = strtok(NULL, s);
 				char *tMax = strtok(NULL, s);
-			
+				
 				if(checkNumber(n_request) && checkNumber(intervalo) && checkNumber(mipr) && checkNumber(tMax)){
 					if(fork() == 0){
 						mobileNodes(n_request, intervalo, mipr, tMax);
 					}	
 				}
 				else{
+					char *t1 = strtok(c1, "\n");
+					char t[100] = "WRONG COMMAND => ";
+					strcat(t, c1);
+					logFile(t);
 					printf("Comando invalido\n");
 				}
 			}
 		
 			else{
+				char t[100] = "WRONG COMMAND => ";
+				strcat(t, comando);
+				logFile(t);
 				printf("Comando invalido\n");
 			}
 		}
