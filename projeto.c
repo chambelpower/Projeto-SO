@@ -30,12 +30,25 @@ void cleanup();
 
 pid_t systemManagerPID;
 
+enum serverState{
+	RUNNING = 0,
+	STOPPED = 1
+};
+
+enum cpuState{
+	BUSY = 0,
+	AVAILABLE = 1
+};
+
 typedef struct _s1{
 	char *name;
 	int capacidade1;
+	int cpuState1;
 	int capacidade2;
+	int cpuState2;
 	char *nivelPerformance;
 	int timeNextTarefa;
+	int state;
 	struct _s1 *next;
 } edge_server;
 
@@ -51,6 +64,7 @@ typedef struct{
 	int slots; //numero de slots na fila interna do TaskManager
 	int maxWait; //tempo maximo para que o processo Monitor eleve o nivel de performance dos Edge Servers
 	int nEdgeServers;//numero de Edge Servers
+	int highPerformanceFlag;//fica a 1 quando for para os servers ficarem no modo highperformance
 	edge_server* edgeList;
 } shm_struct;
 
@@ -60,17 +74,20 @@ sem_t *mutex;
 sem_t *serverMutex;
 sem_t *logSem;
 
-typedef struct _s3{
+typedef struct _s5{
 	int id;
 	int n_instrucoes;
 	int tMax;
+	int tChegada;
 	int prio;
+} data;
+
+typedef struct _s3{
+	data* data;
 	struct _s3 *next;
 } tasks;
 
-typedef struct _s4{
-	tasks* taskList;
-} filaTasks;
+tasks *taskList;
 
 struct tm* getTime() {
 	time_t now = time(NULL);
@@ -78,8 +95,7 @@ struct tm* getTime() {
 	return tm_struct;
 }
 
-int filaID;
-filaTasks *filaT;
+
 
 pthread_mutex_t mutexFila = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t scheduler_cs= PTHREAD_COND_INITIALIZER;
@@ -196,16 +212,49 @@ void edgeServer(char *name, int capMin, int capMax){
   	}
 }
 
-void removeTarefasImpo(){
-
+void removeTarefasImpo__Prio(){
+	tasks* t = taskList;
+	int timeAtual = (int)time(NULL);
+	while(t != NULL){
+		if(t->data->id != -1 && t->data->tMax >= timeAtual){
+			t->data->id = -1;//-1 representa que o lugar na lista nao esta ocupado
+			printf("Task Removed\n");
+			logFile("TASK REMOVED");
+		}
+		else{
+			t->data->prio = t->data->tMax - timeAtual;//no maximo este valor pode ser 1, desempatado pela ordem de chegada
+		}
+		t=t->next;
+	}
 }
 
-void prioridades(){
 
-}
 
 void ordenar(){
-
+	tasks* current = taskList;
+	tasks* index;
+	tasks* temp = (tasks*)malloc(sizeof(tasks));
+	while(current != NULL){
+		index = current->next;
+		
+		while(index != NULL){
+			if(current->data->prio > index->data->prio){
+				temp->data = current->data;
+				current->data = index->data;
+				index->data = temp->data;
+			}
+			if(current->data->prio == index->data->prio){
+				if(current->data->tChegada > index->data->tChegada){
+					temp->data = current->data;
+					current->data = index->data;
+					index->data = temp->data;
+				}
+			}
+			index = index->next;
+		}
+		current = current->next;
+		
+	}
 }
 
 void *scheduler(void *t){
@@ -215,13 +264,51 @@ void *scheduler(void *t){
 		pthread_cond_wait(&scheduler_cs, &mutexFila);
 		printf("RECEBEU SINAL\n");
 		
-		removeTarefasImpo();
-		prioridades();
+		removeTarefasImpo__Prio();
 		ordenar();
 		pthread_mutex_unlock(&mutexFila);
 		
 	}
 	pthread_exit(NULL);
+}
+
+int verificaExistirTarefas(){
+	tasks* t = taskList;
+	while(t != NULL){
+		if(id != -1){
+			return 1;
+		}	
+		t=t->next;
+	}
+	return -1;
+}
+
+int tryDispatchTask(tasks* t){
+	sem_wait(mutex); 
+	edge_server* serverList = sh_mem->edgeList;
+	while(serverList != NULL){
+		if(serverList->cpuState)
+	}
+	sem_post(mutex);
+}
+
+void *dispatcher(void *t){
+	printf("Starting dispatcher\n");
+	while(1){
+		pthread_mutex_lock(&mutexFila);
+		while(verificaExistirTarefas() == 0){
+			pthread_cond_wait(&dispatcher_cs, &mutexFila);
+		}
+		tasks* t = taskList;
+		while(t != NULL){//esta sempre ordenado por prioridade por isso apenas temos que percorrer e encontrar uma que seja possivel fazer
+			if(tryDispatchTask(t) == 1){
+				printf("TASK DISPATCHED\n");
+				break;
+			}
+			t=t->next;
+		}
+		pthread_mutex_unlock(&mutexFila);
+	}
 }
 
 void taskManager(){
@@ -263,41 +350,27 @@ void taskManager(){
 	sem_post(serverMutex);
 	//criacao da fila de tasks
 	
-	if((filaID = shmget(IPC_PRIVATE, sizeof(filaTasks), IPC_CREAT|0776)) < 0){
-		logFile("ERROR CREATING SHARED MEMORY");
-		perror("Erro ao criar a memoria partilhada2");
-		cleanup();
-		exit(1);
-	}
-	
-	if((filaT = (filaTasks*) shmat(filaID, NULL, 0)) < 0){
-		logFile("ERROR MAPING SHARED MEMORY");
-		perror("Erro ao mapear a memoria partilhada2");
-		cleanup();
-		exit(1);
-	}
-	
-	//int id[1];//para ja apenas a dispatcher
-  	pthread_t thread_id;
-  	
-	pthread_create(&thread_id, NULL, scheduler, NULL);
-	
 	
 	pthread_mutex_lock(&mutexFila);
 	tasks* t = (tasks*)malloc(sizeof(tasks));
-	t->id = -1;// e utilizado -1 quando o espaco na lista nao esta ocupado
+	t->data = (data*)malloc(sizeof(data));
+	t->data->id = -1;// e utilizado -1 quando o espaco na lista nao esta ocupado
 	t->next = NULL;
-	filaT->taskList = t;
+	taskList = t;
 	for(int i = 1; i < sh_mem->slots; i++){
 		tasks *t1 = (tasks*)malloc(sizeof(tasks));
-		t1->id = -1;
+		t1->data = (data*)malloc(sizeof(data));
+		t1->data->id = -1;
 		t1->next = NULL;
 		t->next = t1;
 		t = t1;
 	}
 	pthread_mutex_unlock(&mutexFila);
 
-	
+	//int id[1];//para ja apenas a dispatcher
+  	pthread_t thread_id;
+  	
+	pthread_create(&thread_id, NULL, scheduler, NULL);
 	
 	while(1){
 		fd = open(task_pipe, O_RDONLY);
@@ -321,7 +394,7 @@ void taskManager(){
 			insertFila(id, n_inst, tMax);
 			pthread_cond_signal(&scheduler_cs);
 			pthread_mutex_unlock(&mutexFila);
-			//print_SHM2();
+			//print_taskList();
 		}
 		close(fd);
 	}
@@ -330,17 +403,18 @@ void taskManager(){
 }
 
 void insertFila(int id, int n_inst, int tMax){
-	tasks* t = filaT->taskList;
+	tasks* t = taskList;
 	while(t != NULL){
-		if(t->id == -1){
+		if(t->data->id == -1){
 			
-			t->id = id;
-			t->n_instrucoes = n_inst;
-			t->tMax = (int)time(NULL) + tMax;
-			printf("TIME: %d\n", t->tMax);
-			t->prio = 0;
+			t->data->id = id;
+			t->data->n_instrucoes = n_inst;
+			t->data->tMax = (int)time(NULL) + tMax;
+			t->data->tChegada = (int)time(NULL);
+			//printf("TIME: %d\n", t->tMax);
+			t->data->prio = 0;
 			logFile("NEW TASK INSERTED");
-			printf("Nova tarefa inserida\n");
+			printf("NEW TASK INSERTED\n");
 			return;
 		}
 		t=t->next;
@@ -359,12 +433,12 @@ void maintenanceManager(){
 	exit(0);
 }
 
-void print_SHM2(){
+void print_taskList(){
 	pthread_mutex_lock(&mutexFila);
 	printf("SHM2:\n");
-	tasks* t = filaT->taskList;
+	tasks* t = taskList;
 	while(t != NULL){
-		printf("ID: %d\n", t->id);
+		printf("ID: %d\n", t->data->id);
 		t=t->next;
 	}
 	pthread_mutex_unlock(&mutexFila);
@@ -406,7 +480,7 @@ void sigCleanup(){
 	}
 }
 
-void cleanup(){
+void cleanup(){//falta dar free a memoria da fila de tasks
 	printf("CLEANUP\n");
 	msgctl(msgID, IPC_RMID, 0);
 	
@@ -526,13 +600,15 @@ int main(){
 	char comando[100];
 	while(1){
 		fgets(comando, 100, stdin);
-		char *token = strtok(comando, "\n");
-		const char s[2] = " ";
-		char *check_comando = strtok(token, s);
-		if(strcmp(check_comando, "offload_simulator") == 0){
-			char *filename = strtok(NULL, s);
+		//char *token = strtok(comando, "\n");
+		//const char s[2] = " ";
+		//char *check_comando = strtok(token, s);
+		//if(strcmp(check_comando, "offload_simulator") == 0){
+			
+			//char *filename = strtok(NULL, s);
+			char *filename = "config_file.txt";//
 			systemManager(filename);
-		}
+		//}
 	}
 	cleanup();	
 	
