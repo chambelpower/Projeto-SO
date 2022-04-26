@@ -49,6 +49,7 @@ typedef struct _s1{
 	char *nivelPerformance;
 	int timeNextTarefa;
 	int state;
+	int channel[2];
 	struct _s1 *next;
 } edge_server;
 
@@ -190,6 +191,10 @@ void *cpu(void *t){
 	//int my_id = *((int *)t);
 
 	printf("CPU is READY\n");
+	while(1){
+		sem_wait(mutex);
+		if()
+	}
 	
 	pthread_exit(NULL);
 }
@@ -280,16 +285,58 @@ int verificaExistirTarefas(){
 		}	
 		t=t->next;
 	}
-	return -1;
+	return 0;
 }
 
 int tryDispatchTask(tasks* t){
 	sem_wait(mutex); 
 	edge_server* serverList = sh_mem->edgeList;
 	while(serverList != NULL){
-		if(serverList->cpuState)
+		if(serverList->cpuState1 == AVAILABLE){
+			if((int)(t->data->n_instrucoes/serverList->capacidade1) + (int)time(NULL) < t->data->tMax){
+				//dispatch
+				write(serverList->channel[1], &t, sizeof(tasks));
+				//removetask
+				t->data->id = -1;
+				sem_post(mutex);
+				return 1;
+			}
+		}
+		if(sh_mem->highPerformanceFlag == 1){
+			if(serverList->cpuState2 == AVAILABLE){
+				if((int)(t->data->n_instrucoes/serverList->capacidade2) + (int)time(NULL) < t->data->tMax){
+					//dispatch
+					write(serverList->channel[1], &t, sizeof(tasks));
+					//removetask
+					t->data->id = -1;
+					sem_post(mutex);
+					return 1;
+				}
+			}
+		}
+		serverList = serverList->next;
 	}
 	sem_post(mutex);
+	return -1;
+}
+
+int taskValida(tasks* t){
+	sem_wait(mutex); 
+	edge_server* serverList = sh_mem->edgeList;
+	while(serverList != NULL){
+		if((int)(t->data->n_instrucoes/serverList->capacidade1) + (int)time(NULL) < t->data->tMax){
+			sem_post(mutex);
+			return 1;
+		}
+		if((int)(t->data->n_instrucoes/serverList->capacidade2) + (int)time(NULL) < t->data->tMax){
+			sem_post(mutex);
+			return 1;
+		}
+		serverList = serverList->next;
+	}
+	t->data->id=-1;//removed
+	sem_post(mutex);
+	return -1;
 }
 
 void *dispatcher(void *t){
@@ -301,9 +348,15 @@ void *dispatcher(void *t){
 		}
 		tasks* t = taskList;
 		while(t != NULL){//esta sempre ordenado por prioridade por isso apenas temos que percorrer e encontrar uma que seja possivel fazer
-			if(tryDispatchTask(t) == 1){
-				printf("TASK DISPATCHED\n");
-				break;
+			if(t->data->id != -1 && taskValida(t) == 1){
+				if(tryDispatchTask(t) == 1){
+					printf("TASK DISPATCHED\n");
+					break;
+				}
+			}
+			else{
+				printf("TASK REMOVED\n");
+
 			}
 			t=t->next;
 		}
@@ -318,7 +371,7 @@ void taskManager(){
 	sem_wait(mutex); 
 	int totalServers = sh_mem->nEdgeServers;
 	edge_server* serverList = sh_mem->edgeList;
-	sem_post(mutex); 
+	
 	sem_unlink("SERVERMUTEX");
 	serverMutex = sem_open("SERVERMUTEX", O_CREAT | O_EXCL, 0700, 1);
 	
@@ -326,7 +379,7 @@ void taskManager(){
 		
 		
 		sem_wait(serverMutex);
-		
+		pipe(serverList->channel);
 		if(fork() == 0){
 			sem_wait(mutex); 
 			char *name = serverList->name;
@@ -344,7 +397,7 @@ void taskManager(){
 		serverList = serverList->next;
 		sem_post(mutex); 
 	}
-	
+	sem_post(mutex); 
 	sem_wait(serverMutex);//para apenas avancar quando os servers todos tiverem preparados
 	printf("Servers ready\n");
 	sem_post(serverMutex);
