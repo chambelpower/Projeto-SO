@@ -187,8 +187,8 @@ void *cpu1(void *t){
 		sem_wait(mutex);
 	
 		if(sh_mem->edgeList[counter].state == RUNNING){
-		
 			
+			sh_mem->edgeList[counter].cpuState1 = AVAILABLE;
 			pthread_mutex_lock(&mutexUnnamedPipe);
 		
 			FD_ZERO(&read_set);
@@ -198,6 +198,7 @@ void *cpu1(void *t){
 			if(select(sh_mem->edgeList[counter].channel[0]+1, &read_set, NULL, NULL, &timeout) > 0){
 				read(sh_mem->edgeList[counter].channel[0], &t1, sizeof(tasks));
 				printf("CPU1 RECEBEU TASK\n");
+				sh_mem->edgeList[counter].cpuState1 = BUSY;
 				sem_post(mutex);
 			}
 			else{
@@ -226,13 +227,14 @@ void *cpu2(void *t){
 	while(1){
 		sem_wait(mutex);
 		if(sh_mem->edgeList[counter].state == RUNNING && sh_mem->highPerformanceFlag == 1){
-			
+			sh_mem->edgeList[counter].cpuState2 = AVAILABLE;
 			pthread_mutex_lock(&mutexUnnamedPipe);
 			FD_ZERO(&read_set);
 			FD_SET(sh_mem->edgeList[counter].channel[0], &read_set);
 			if(select(sh_mem->edgeList[counter].channel[0]+1, &read_set, NULL, NULL, &timeout) > 0){
 				read(sh_mem->edgeList[counter].channel[0], &t1, sizeof(tasks));
 				printf("CPU2 RECEBEU TASK\n");
+				sh_mem->edgeList[counter].cpuState2 = BUSY;
 				sem_post(mutex);
 			}
 			else{
@@ -263,21 +265,21 @@ void edgeServer(int counter){
 	logFile(strcat(var, " READY"));//nao pode ser assim, esta a adicionar READY a variavel na memoria partilhada
 	
 
-	printf("NAME: %s\n", sh_mem->edgeList[counter].name);
+	//printf("NAME: %s\n", sh_mem->edgeList[counter].name);
 	
 	sh_mem->edgeList[counter].state = RUNNING;
-	printf("STATE: %d\n", sh_mem->edgeList[counter].state);
+	//printf("STATE: %d\n", sh_mem->edgeList[counter].state);
 	
-	changeServerName(counter, "DEBUG");
+	//changeServerName(counter, "DEBUG");
 	sem_post(mutex);
 	//printServers();
 	pthread_create(&threads[0], NULL, cpu1, &counter);
 	pthread_create(&threads[1], NULL, cpu2, &counter);
 	
 	
-	printf("DEBUG5\n");
+	//printf("DEBUG5\n");
 	
-  	printServers();
+  	//printServers();
 	for(i = 0; i < NCPU; i++){
 		pthread_join(threads[i], NULL);
   	}
@@ -434,27 +436,27 @@ int taskValida(tasks* t){
 }
 
 int verificaCPU(){
+	//printf("DEBUG1\n");
 	sem_wait(mutex);
+	//printf("DEBUG2\n");
 	for(int i=0; i < sh_mem->nEdgeServers; i++){
-		//printf("DEBUG0: %s\n", sh_mem->edgeList[i].name);
-		//printf("DEBUG1: %d\n", sh_mem->edgeList[i].state);
-		//printf("DEBUG2: %d\n", STOPPED);
-		//printServers2();
 		if(sh_mem->edgeList[i].state == RUNNING){
-			printf("ESTADO1: %d, ESTADO2: %d\n", sh_mem->edgeList[i].cpuState1, sh_mem->edgeList[i].cpuState2);
+			//printf("ESTADO1: %d, ESTADO2: %d\n", sh_mem->edgeList[i].cpuState1, sh_mem->edgeList[i].cpuState2);
 			if(sh_mem->edgeList[i].cpuState1 == AVAILABLE){
 				printf("ENCONTROU CPU1\n");
+				sem_post(mutex);
 				return 1;
 			}
 			if(sh_mem->highPerformanceFlag == 1){
 				if(sh_mem->edgeList[i].cpuState2 == AVAILABLE){
 					printf("ENCONTROU CPU2\n");
+					sem_post(mutex);
 					return 2;
 				}
 			}	
 		}
 	}
-	printf("FLAG: %d\n", sh_mem->highPerformanceFlag);
+	//printf("FLAG: %d\n", sh_mem->highPerformanceFlag);
 	sem_post(mutex);
 	printf("NAO ENCONTROU CPU DISPONIVEL\n");
 	
@@ -479,26 +481,27 @@ void *dispatcher(void *t){
 	printf("Starting dispatcher\n");
 	while(1){
 		
-		while(verificaExistirTarefas() == 0 && verificaCPU() == 0){
-			sleep(2);
-		}
+		while(verificaExistirTarefas() == 0 && verificaCPU() == 0);
 		pthread_mutex_lock(&mutexFila);
 		tasks* t = taskList;
-		printf("DEBUG6\n");
+		//printf("DEBUG6\n");
 		while(t != NULL){//esta sempre ordenado por prioridade por isso apenas temos que percorrer e encontrar uma que seja possivel fazer
-			if(t->data->id != -1 && taskValida(t) == 1){
-				if(tryDispatchTask(t) == 1){
-					printf("TASK DISPATCHED\n");
-					break;
+			if(t->data->id != -1){
+				if(taskValida(t) == 1){
+					if(tryDispatchTask(t) == 1){
+						printf("TASK DISPATCHED\n");
+						break;
+					}
+				}
+				else{
+					printf("TASK REMOVED\n");
 				}
 			}
-			else{
-				printf("TASK REMOVED\n");
-
-			}
+			
 			t=t->next;
 		}
 		pthread_mutex_unlock(&mutexFila);
+		sleep(2);
 	}
 }
 
@@ -533,8 +536,8 @@ void taskManager(){
 	printf("Servers ready\n");
 	sem_post(serverMutex);
 	//criacao da fila de tasks
-	sleep(3);
-	printServers();
+	//sleep(3);
+	//printServers();
 	
 	pthread_mutex_lock(&mutexFila);
 	tasks* t = (tasks*)malloc(sizeof(tasks));
@@ -738,7 +741,7 @@ void systemManager(char *filename){
 		exit(1);
 	}
 
-	print_SHM();
+	//print_SHM();
 	
 	
 	//int fd;
