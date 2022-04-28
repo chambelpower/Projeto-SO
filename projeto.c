@@ -70,7 +70,7 @@ typedef struct{
 	int maxWait; //tempo maximo para que o processo Monitor eleve o nivel de performance dos Edge Servers
 	int nEdgeServers;//numero de Edge Servers
 	int highPerformanceFlag;//fica a 1 quando for para os servers ficarem no modo highperformance
-	edge_server serverList [MAX_SERVERS];
+	edge_server edgeList [MAX_SERVERS];
 } shm_struct;
 
 int shmid;
@@ -641,7 +641,7 @@ void print_SHM(){
 	printf("MaxWait: %d\n", sh_mem->maxWait);
 	printf("N de EdgeServers: %d\n", sh_mem->nEdgeServers);
 	for(int i=0; i < sh_mem->nEdgeServers; i++){
-		printf("%s: %d, %d\n", sh_mem->edgeList[i]name, sh_mem->edgeList[i]capacidade1, sh_mem->edgeList[i]capacidade2);
+		printf("%s: %d, %d\n", sh_mem->edgeList[i].name, sh_mem->edgeList[i].capacidade1, sh_mem->edgeList[i].capacidade2);
 	}
 	sem_post(mutex);
 }
