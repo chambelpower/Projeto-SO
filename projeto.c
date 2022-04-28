@@ -21,6 +21,9 @@
 #include <pthread.h>
 
 #define NCPU 2
+#define MAX_SERVERS 100
+#define MAX_CHAR 1024
+
 int readFile(char* file);
 void print_SHM();
 void systemManager();
@@ -43,16 +46,15 @@ enum cpuState{
 };
 
 typedef struct _s1{
-	char *name;
+	char name[MAX_CHAR];
 	int capacidade1;
 	int cpuState1;
 	int capacidade2;
 	int cpuState2;
-	char *nivelPerformance;
+	char nivelPerformance[MAX_CHAR];
 	int timeNextTarefa;
 	int state;
 	int channel[2];
-	struct _s1 *next;
 } edge_server;
 
 typedef struct _s2{
@@ -68,7 +70,7 @@ typedef struct{
 	int maxWait; //tempo maximo para que o processo Monitor eleve o nivel de performance dos Edge Servers
 	int nEdgeServers;//numero de Edge Servers
 	int highPerformanceFlag;//fica a 1 quando for para os servers ficarem no modo highperformance
-	edge_server* edgeList;
+	edge_server serverList [MAX_SERVERS];
 } shm_struct;
 
 int shmid;
@@ -146,47 +148,23 @@ int readFile(char* file){
 			return -2;
 		}
 	}
-	i = 1;
-	edge_server *e;
-	if(fgets(line, sizeof(line), f)){
-			char *newLine = strtok(line, "\n");
-			char *value = strtok(newLine, ",");
-			e = (edge_server*)malloc(sizeof(edge_server));
-			e->name = (char*)malloc(strlen(value));
-			sprintf(e->name, "%s", value);
-			value = strtok(NULL, ",");
-			e->capacidade1 = atoi(value);
-			value = strtok(NULL, ",");
-			e->capacidade2 = atoi(value);
-			e->state = 5;
-			e->next = NULL;
-		}
-	else{
-		return -2;
-	}
-	sh_mem->edgeList = e;
-	while(i < sh_mem->nEdgeServers){
+	for(i = 0; i < sh_mem->nEdgeServers; i++){
 		if(fgets(line, sizeof(line), f)){
 			char *newLine = strtok(line, "\n");
 			char *value = strtok(newLine, ",");
-			
-			edge_server *e1 = (edge_server*)malloc(sizeof(edge_server));
-			e1->name = (char*)malloc(strlen(value));
-			sprintf(e1->name, "%s", value);
+			strcpy(sh_mem->edgeList[i].name, value);
 			value = strtok(NULL, ",");
-			e1->capacidade1 = atoi(value);
+			sh_mem->edgeList[i].capacidade1 = atoi(value);
 			value = strtok(NULL, ",");
-			e1->capacidade2 = atoi(value);
-			e1->state = 5;
-			e1->next = NULL;
-			e->next = e1;
-			e = e1;
+			sh_mem->edgeList[i].capacidade2 = atoi(value);
+			sh_mem->edgeList[i].state = STOPPED;
 		}
 		else{
 			return -2;
 		}
-		i++;
-	} 
+	}
+	
+	
 	sh_mem->highPerformanceFlag = 0;
 	sem_post(mutex);
 	fclose(f);
@@ -197,15 +175,8 @@ int readFile(char* file){
 void *cpu1(void *t){
 	printf("CPU1 is READY\n");
 	int counter = *((int *)t);
-	int i = 0;
 	sem_wait(mutex);
-	edge_server* e = sh_mem->edgeList;
-	while(i < counter){
-		e = e->next;
-		i++;
-	}	
-	
-	close(e->channel[1]);
+	close(sh_mem->edgeList[counter].channel[1]);
 	sem_post(mutex);
 	fd_set read_set;
 	
@@ -215,17 +186,17 @@ void *cpu1(void *t){
 		
 		sem_wait(mutex);
 	
-		if(e->state == RUNNING){
+		if(sh_mem->edgeList[counter].state == RUNNING){
 		
 			
 			pthread_mutex_lock(&mutexUnnamedPipe);
 		
 			FD_ZERO(&read_set);
 			
-			FD_SET(e->channel[0], &read_set);
+			FD_SET(sh_mem->edgeList[counter].channel[0], &read_set);
 			
-			if(select(e->channel[0]+1, &read_set, NULL, NULL, &timeout) > 0){
-				read(e->channel[0], &t1, sizeof(tasks));
+			if(select(sh_mem->edgeList[counter].channel[0]+1, &read_set, NULL, NULL, &timeout) > 0){
+				read(sh_mem->edgeList[counter].channel[0], &t1, sizeof(tasks));
 				printf("CPU1 RECEBEU TASK\n");
 				sem_post(mutex);
 			}
@@ -247,27 +218,20 @@ void *cpu2(void *t){
 	
 	printf("CPU2 is READY\n");
 	int counter = *((int *)t);
-	int i = 0;
-	sem_wait(mutex);
-	edge_server* e = sh_mem->edgeList;
-	while(i < counter){
-		e = e->next;
-		i++;
-	}	
-	
-	close(e->channel[1]);
+	sem_wait(mutex);	
+	close(sh_mem->edgeList[counter].channel[1]);//talvez nao necessario? pq ja foi feito no cpu1
 	sem_post(mutex);
 	fd_set read_set;
 	tasks* t1;
 	while(1){
 		sem_wait(mutex);
-		if(e->state == RUNNING && sh_mem->highPerformanceFlag == 1){
+		if(sh_mem->edgeList[counter].state == RUNNING && sh_mem->highPerformanceFlag == 1){
 			
 			pthread_mutex_lock(&mutexUnnamedPipe);
 			FD_ZERO(&read_set);
-			FD_SET(e->channel[0], &read_set);
-			if(select(e->channel[0]+1, &read_set, NULL, NULL, &timeout) > 0){
-				read(e->channel[0], &t1, sizeof(tasks));
+			FD_SET(sh_mem->edgeList[counter].channel[0], &read_set);
+			if(select(sh_mem->edgeList[counter].channel[0]+1, &read_set, NULL, NULL, &timeout) > 0){
+				read(sh_mem->edgeList[counter].channel[0], &t1, sizeof(tasks));
 				printf("CPU2 RECEBEU TASK\n");
 				sem_post(mutex);
 			}
@@ -284,33 +248,25 @@ void *cpu2(void *t){
 	pthread_exit(NULL);
 }
 void changeServerName(int counter, char *str){
-	int i = 0;
-	edge_server* serverList = sh_mem->edgeList;
-	while(i < counter){
-		serverList=serverList->next;
-		i++;
-	}
-	strcat(serverList->name, str);
-	sh_mem->highPerformanceFlag++;
-	
-	
+	strcat(sh_mem->edgeList[counter].name, str);
+	//sh_mem->highPerformanceFlag++;//DEBUG
 }
-void edgeServer(edge_server *e, int counter){
+void edgeServer(int counter){
 	int i;
 	char var[100];
 	pthread_t threads[NCPU];
 	//printServers();
 	sem_post(serverMutex);
 	sem_wait(mutex);
-	printf("%s STARTED\n", e->name);
-	strcpy(var, e->name);
+	printf("%s STARTED\n", sh_mem->edgeList[counter].name);
+	strcpy(var, sh_mem->edgeList[counter].name);
 	logFile(strcat(var, " READY"));//nao pode ser assim, esta a adicionar READY a variavel na memoria partilhada
 	
 
-	printf("NAME: %s\n", e->name);
+	printf("NAME: %s\n", sh_mem->edgeList[counter].name);
 	
-	e->state = RUNNING;
-	printf("STATE: %d\n", e->state);
+	sh_mem->edgeList[counter].state = RUNNING;
+	printf("STATE: %d\n", sh_mem->edgeList[counter].state);
 	
 	changeServerName(counter, "DEBUG");
 	sem_post(mutex);
@@ -430,12 +386,12 @@ int verificaExistirTarefas(){
 int tryDispatchTask(tasks* t){
 	printf("TRY DISPATCH\n");
 	sem_wait(mutex); 
-	edge_server* serverList = sh_mem->edgeList;
-	while(serverList != NULL){
-		if(serverList->cpuState1 == AVAILABLE){
-			if((int)(t->data->n_instrucoes/serverList->capacidade1) + (int)time(NULL) < t->data->tMax){
+	
+	for(int i=0; i < sh_mem->nEdgeServers; i++){
+		if(sh_mem->edgeList[i].cpuState1 == AVAILABLE){
+			if((int)(t->data->n_instrucoes/sh_mem->edgeList[i].capacidade1) + (int)time(NULL) < t->data->tMax){
 				//dispatch
-				write(serverList->channel[1], &t, sizeof(tasks));
+				write(sh_mem->edgeList[i].channel[1], &t, sizeof(tasks));
 				//removetask
 				t->data->id = -1;
 				sem_post(mutex);
@@ -443,10 +399,10 @@ int tryDispatchTask(tasks* t){
 			}
 		}
 		if(sh_mem->highPerformanceFlag == 1){
-			if(serverList->cpuState2 == AVAILABLE){
-				if((int)(t->data->n_instrucoes/serverList->capacidade2) + (int)time(NULL) < t->data->tMax){
+			if(sh_mem->edgeList[i].cpuState2 == AVAILABLE){
+				if((int)(t->data->n_instrucoes/sh_mem->edgeList[i].capacidade2) + (int)time(NULL) < t->data->tMax){
 					//dispatch
-					write(serverList->channel[1], &t, sizeof(tasks));
+					write(sh_mem->edgeList[i].channel[1], &t, sizeof(tasks));
 					//removetask
 					t->data->id = -1;
 					sem_post(mutex);
@@ -454,7 +410,6 @@ int tryDispatchTask(tasks* t){
 				}
 			}
 		}
-		serverList = serverList->next;
 	}
 	sem_post(mutex);
 	return -1;
@@ -462,17 +417,16 @@ int tryDispatchTask(tasks* t){
 
 int taskValida(tasks* t){
 	sem_wait(mutex); 
-	edge_server* serverList = sh_mem->edgeList;
-	while(serverList != NULL){
-		if((int)(t->data->n_instrucoes/serverList->capacidade1) + (int)time(NULL) < t->data->tMax){
+	
+	for(int i=0; i < sh_mem->nEdgeServers; i++){
+		if((int)(t->data->n_instrucoes/sh_mem->edgeList[i].capacidade1) + (int)time(NULL) < t->data->tMax){
 			sem_post(mutex);
 			return 1;
 		}
-		if((int)(t->data->n_instrucoes/serverList->capacidade2) + (int)time(NULL) < t->data->tMax){
+		if((int)(t->data->n_instrucoes/sh_mem->edgeList[i].capacidade2) + (int)time(NULL) < t->data->tMax){
 			sem_post(mutex);
 			return 1;
 		}
-		serverList = serverList->next;
 	}
 	t->data->id=-1;//removed
 	sem_post(mutex);
@@ -481,26 +435,24 @@ int taskValida(tasks* t){
 
 int verificaCPU(){
 	sem_wait(mutex);
-	edge_server* serverList = sh_mem->edgeList;
-	while(serverList != NULL){
-		//printf("DEBUG0: %s\n", serverList->name);
-		//printf("DEBUG1: %d\n", serverList->state);
+	for(int i=0; i < sh_mem->nEdgeServers; i++){
+		//printf("DEBUG0: %s\n", sh_mem->edgeList[i].name);
+		//printf("DEBUG1: %d\n", sh_mem->edgeList[i].state);
 		//printf("DEBUG2: %d\n", STOPPED);
 		//printServers2();
-		if(serverList->state == RUNNING){
-			printf("ESTADO1: %d, ESTADO2: %d\n", serverList->cpuState1, serverList->cpuState2);
-			if(serverList->cpuState1 == AVAILABLE){
+		if(sh_mem->edgeList[i].state == RUNNING){
+			printf("ESTADO1: %d, ESTADO2: %d\n", sh_mem->edgeList[i].cpuState1, sh_mem->edgeList[i].cpuState2);
+			if(sh_mem->edgeList[i].cpuState1 == AVAILABLE){
 				printf("ENCONTROU CPU1\n");
 				return 1;
 			}
 			if(sh_mem->highPerformanceFlag == 1){
-				if(serverList->cpuState2 == AVAILABLE){
+				if(sh_mem->edgeList[i].cpuState2 == AVAILABLE){
 					printf("ENCONTROU CPU2\n");
 					return 2;
 				}
 			}	
 		}
-		serverList=serverList->next;
 	}
 	printf("FLAG: %d\n", sh_mem->highPerformanceFlag);
 	sem_post(mutex);
@@ -511,22 +463,16 @@ int verificaCPU(){
 
 void printServers(){
 	sem_wait(mutex);
-	edge_server* serverList = sh_mem->edgeList;
-	while(serverList != NULL){
-		printf("%s, STATE: %d\n", serverList->name, serverList->state);
-		serverList=serverList->next;
+	for(int i=0; i < sh_mem->nEdgeServers; i++){
+		printf("%s, STATE: %d\n", sh_mem->edgeList[i].name, sh_mem->edgeList[i].state);
 	}
 	sem_post(mutex);
 }
 
 void printServers2(){
-	
-	edge_server* serverList = sh_mem->edgeList;
-	while(serverList != NULL){
-		printf("%s, STATE: %d\n", serverList->name, serverList->state);
-		serverList=serverList->next;
+	for(int i=0; i < sh_mem->nEdgeServers; i++){
+		printf("%s, STATE: %d\n", sh_mem->edgeList[i].name, sh_mem->edgeList[i].state);
 	}
-	
 }
 
 void *dispatcher(void *t){
@@ -565,24 +511,20 @@ void taskManager(){
 	timeout.tv_sec = 0;
 	timeout.tv_usec = 10;
 	sem_wait(mutex); 
-	int totalServers = sh_mem->nEdgeServers;
-	edge_server* serverList = sh_mem->edgeList;
+	
 	sem_unlink("SERVERMUTEX");
 	serverMutex = sem_open("SERVERMUTEX", O_CREAT | O_EXCL, 0700, 1);
 	
-	for(int i = 0; i < totalServers; i++){
+	for(int i = 0; i < sh_mem->nEdgeServers; i++){
 		printf("here1\n");
 		sem_wait(serverMutex);
 		printf("here2\n");
-		pipe(serverList->channel);
+		pipe(sh_mem->edgeList[i].channel);
 		if(fork() == 0){
-			
-			printf("Edge Server %s\n", serverList->name);
-			edgeServer(serverList, i);	
+			printf("Edge Server %s\n", sh_mem->edgeList[i].name);
+			edgeServer(i);	
 			exit(0);
 		}
-		serverList = serverList->next;
-		
 	}
 	
 	sem_post(mutex); 
@@ -698,10 +640,8 @@ void print_SHM(){
 	printf("Slots: %d\n", sh_mem->slots);
 	printf("MaxWait: %d\n", sh_mem->maxWait);
 	printf("N de EdgeServers: %d\n", sh_mem->nEdgeServers);
-	edge_server* serverList = sh_mem->edgeList;
-	while(serverList != NULL){
-		printf("%s: %d, %d\n", serverList->name, serverList->capacidade1, serverList->capacidade2);
-		serverList = serverList->next;
+	for(int i=0; i < sh_mem->nEdgeServers; i++){
+		printf("%s: %d, %d\n", sh_mem->edgeList[i]name, sh_mem->edgeList[i]capacidade1, sh_mem->edgeList[i]capacidade2);
 	}
 	sem_post(mutex);
 }
