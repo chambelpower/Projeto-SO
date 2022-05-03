@@ -61,6 +61,7 @@ void mobileNodes(char *var1,char *var2,char *var3,char *var4){
 		writeNamedPipe(c);
 		sleep(intervalo / 1000);
 	}
+	printf("DEBUG1\n");
 	exit(0);
 }
 
