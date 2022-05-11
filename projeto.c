@@ -23,6 +23,7 @@
 #define NCPU 2
 #define MAX_SERVERS 100
 #define MAX_CHAR 1024
+#define QUEUE_MSG_TYPE 10000
 
 int readFile(char* file);
 void print_SHM();
@@ -226,7 +227,13 @@ void *cpu1(void *t){
 				
 				sh_mem->edgeList[counter].timeNextTarefa1 = (int)(ts.n_instru/sh_mem->edgeList[counter].capacidade1);
 				
-				doTask(ts.n_instru, sh_mem->edgeList[counter].capacidade1);
+				int instru = ts.n_instru;
+				int cap = sh_mem->edgeList[counter].capacidade1;
+				pthread_mutex_unlock(&mutexUnnamedPipe);
+				sem_post(mutex);
+				
+				
+				doTask(instru, cap);
 			
 				printf("TAREFA CONCLUIDA\n");
 				char var[MAX_CHAR*2];
@@ -315,27 +322,36 @@ void edgeServer(int counter){
 	logFile(strcat(var, " READY"));
 	
 	message msg;
-	msg.mtype = -1;
+	msg.mtype = QUEUE_MSG_TYPE;
 	strcpy(msg.mesg_text, "alive");
 	msgsnd(msgID, &msg, sizeof(message), 0); //informa o mm que esta vivo
-	
+	//printf("ALIVE SENT\n");
 	
 	sh_mem->edgeList[counter].state = RUNNING;
 	
 	sem_post(mutex);
 	
 	while(1){
-		msgrcv(msgID, &msg, sizeof(message), counter, 0);//aviso que tem que entrar em modo STOPPED
+		
+		msg.mtype = counter;
+		msgrcv(msgID, &msg, sizeof(message), counter+1, 0);//aviso que tem que entrar em modo STOPPED
+		//printf("DEBUG4.1 MSG: %s, COUNTER: %d\n", msg.mesg_text, counter+1);
 		sem_wait(mutex);
+		
 		sh_mem->edgeList[counter].state = STOPPED;
+		
 		while(sh_mem->edgeList[counter].cpuState1 == BUSY && sh_mem->edgeList[counter].cpuState2 == BUSY);
 		
-		msg.mtype = -1;
+		msg.mtype = QUEUE_MSG_TYPE;
 		strcpy(msg.mesg_text, "ready");
+		
 		msgsnd(msgID, &msg, sizeof(message), 0);
+		
 		printf("%s ENTROU EM MODO STOPPED\n", sh_mem->edgeList[counter].name);
 		sem_post(mutex);
-		msgrcv(msgID, &msg, sizeof(message), counter, 0);//aviso que pode voltar ao modo RUNNING
+		//printf("WAITING...\n");
+		msgrcv(msgID, &msg, sizeof(message), counter+1, 0);//aviso que pode voltar ao modo RUNNING
+		//printf("GETTING BACK TO RUNNING\n");
 		sem_wait(mutex);
 		sh_mem->edgeList[counter].state = RUNNING;
 		printf("%s VOLTOU AO MODO RUNNING\n", sh_mem->edgeList[counter].name);
@@ -446,7 +462,7 @@ int verificaExistirTarefas(){
 		}	
 		t=t->next;
 	}
-	printf("NAO ENCONTROU TAREFA\n");
+	//printf("NAO ENCONTROU TAREFA\n");
 	return 0;
 }
 
@@ -525,13 +541,13 @@ int verificaCPU(){
 		if(sh_mem->edgeList[i].state == RUNNING){
 			//printf("ESTADO1: %d, ESTADO2: %d\n", sh_mem->edgeList[i].cpuState1, sh_mem->edgeList[i].cpuState2);
 			if(sh_mem->edgeList[i].cpuState1 == AVAILABLE){
-				printf("ENCONTROU CPU1\n");
+				//printf("ENCONTROU CPU1\n");
 				sem_post(mutex);
 				return 1;
 			}
 			if(sh_mem->highPerformanceFlag == 1){
 				if(sh_mem->edgeList[i].cpuState2 == AVAILABLE){
-					printf("ENCONTROU CPU2\n");
+					//printf("ENCONTROU CPU2\n");
 					sem_post(mutex);
 					return 2;
 				}
@@ -540,7 +556,7 @@ int verificaCPU(){
 	}
 	//printf("FLAG: %d\n", sh_mem->highPerformanceFlag);
 	sem_post(mutex);
-	printf("NAO ENCONTROU CPU DISPONIVEL\n");
+	//printf("NAO ENCONTROU CPU DISPONIVEL\n");
 	
 	return 0;
 }
@@ -577,7 +593,7 @@ void *dispatcher(void *t){
 				}
 				else{
 					printf("TASK REMOVED\n");
-				}
+				}printf("DEBUG6\n");
 			}
 			
 			t=t->next;
@@ -595,7 +611,7 @@ void taskManager(){
 	
 	timeout.tv_sec = 0;
 	timeout.tv_usec = 10;
-	sem_wait(mutex); 
+	sem_wait(mutex); printf("DEBUG6\n");
 	
 	sem_unlink("SERVERMUTEX");
 	serverMutex = sem_open("SERVERMUTEX", O_CREAT | O_EXCL, 0700, 1);
@@ -624,7 +640,7 @@ void taskManager(){
 	pthread_mutex_lock(&mutexFila);
 	tasks* t = (tasks*)malloc(sizeof(tasks));
 	//t->data = (data*)malloc(sizeof(data));
-	t->data.id = -1;// e utilizado -1 quando o espaco na lista nao esta ocupado
+	t->data.id = -1;// e utilizado -1 quanprintf("DEBUG6\n");do o espaco na lista nao esta ocupado
 	t->data.prio = 1000;
 	t->next = NULL;
 	taskList = t;
@@ -722,6 +738,7 @@ void monitor(){
 			sem_wait(mutex);
 			if(sh_mem->currentTasksN / sh_mem->slots > 0.8 && tempoEspera() == 1){
 				sh_mem->highPerformanceFlag = 1; //ativa highperformance mode
+				printf("HIGHPERFORMANCE FLAG ATIVATED\n");
 				sem_post(mutex);
 				break;
 			}
@@ -730,7 +747,8 @@ void monitor(){
 		while(1){
 			sem_wait(mutex);
 			if(sh_mem->currentTasksN / sh_mem->slots <= 0.2){
-				sh_mem->highPerformanceFlag = 1; //desliga highperformance mode
+				sh_mem->highPerformanceFlag = 0; //desliga highperformance mode
+				printf("HIGHPERFORMANCE FLAG DEATIVATED\n");
 				sem_post(mutex);
 				break;
 			}
@@ -747,27 +765,37 @@ void maintenanceManager(){
 	sem_post(mutex);
 	message msg;
 	srandom(getpid());
-	int randomStop;
+	/*int randomStop;
 	int randomIntervalo;
 	int min = 1;
-	int max = 5;
+	int max = 5;*/
+	//printf("DEBUG5\n");
 	for(int i = 0; i < totalServers; i++){//esperar pela mensagem de alive dos servers
-		msgrcv(msgID, &msg, sizeof(message), -1, 0);
+		msgrcv(msgID, &msg, sizeof(message), QUEUE_MSG_TYPE, 0);
+		printf("MESSAGE RECEIVED\n");
 	}
+	/*
+	//printf("STARTING 1234567777234234234\n");
+	while(1){
 	for(int i = 0; i < totalServers; i++){
 		strcpy(msg.mesg_text, "PrepareStop");
-		msg.mtype = i;
+		msg.mtype = i+1;
 		msgsnd(msgID, &msg, sizeof(message), 0);//mensagem para o servidor com o aviso de que vai haver uma intervencao
 		randomStop = (random() % (max + 1 - min)) + min;
-		msgrcv(msgID, &msg, sizeof(message), -1, 0);//mensagem do servidor a dizer que esta preparado para entrar em modo stopped
+		//printf("WAITING FOR SERVER TO BE READY...\n");
+		msg.mtype = QUEUE_MSG_TYPE;
+		msgrcv(msgID, &msg, sizeof(message), QUEUE_MSG_TYPE, 0);//mensagem do servidor a dizer que esta preparado para entrar em modo stopped
+		//printf("VAI DORMIR POR %d sec\n", randomStop);
 		sleep(randomStop);
+		//printf("ACORDOU\n");
 		strcpy(msg.mesg_text, "StartRunning");
-		msg.mtype = i;
+		msg.mtype = i+1;
 		msgsnd(msgID, &msg, sizeof(message), 0);//informa o servidor que pode voltar a correr
 		randomIntervalo = (random() % (max + 1 - min)) + min;
+		//printf("SLEEP->%dsec\n", randomIntervalo);
 		sleep(randomIntervalo);
 	}
-	
+	}*/
 }
 
 void print_taskList(){
