@@ -61,14 +61,12 @@ void mobileNodes(char *var1,char *var2,char *var3,char *var4){
 		writeNamedPipe(c);
 		sleep(intervalo / 1000);
 	}
-	printf("DEBUG1\n");
 	exit(0);
 }
 
 int checkNumber(char *var){
 	
 	if(var == NULL || var[0] == '\0'){
-		printf("debug\n");
 		return 0;
 	}
 	int l = strlen(var);
