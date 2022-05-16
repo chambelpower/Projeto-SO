@@ -22,7 +22,7 @@
 
 #define NCPU 2
 #define MAX_SERVERS 100
-#define MAX_CHAR 1024
+#define MAX_CHAR 512
 #define QUEUE_MSG_TYPE 10000
 
 int readFile(char* file);
@@ -30,12 +30,19 @@ void print_SHM();
 void systemManager();
 void print_SHM2();
 void insertFila(int id, int n_inst, int tMax);
-void cleanup();
+
 void print_lista_tarefas();
 void printServers();
 void printServers2();
 void logFile(char msg[MAX_CHAR]);
+void stats();
+void sigCleanup();
+
+
 pid_t systemManagerPID;
+pid_t mmPID;
+pid_t monitorPID;
+pid_t taskMPID;
 
 enum serverState{
 	RUNNING = 0,
@@ -44,7 +51,8 @@ enum serverState{
 
 enum cpuState{
 	BUSY = 0,
-	AVAILABLE = 1
+	AVAILABLE = 1,
+	ENDING = 2
 };
 
 typedef struct _s1{
@@ -82,6 +90,7 @@ typedef struct{
 	int tempoMedioDeEspera;
 	int tarefasMedioDeEspera;
 	int totalTarefasNaoRealizadas;
+	int endingFlag;
 } shm_struct;
 
 int shmid;
@@ -201,6 +210,7 @@ int readFile(char* file){
 	
 	
 	sh_mem->highPerformanceFlag = 0;
+	sh_mem->endingFlag = 0;
 	
 	sem_post(mutex);
 	fclose(f);
@@ -217,7 +227,7 @@ void doTask(int n_instrucoes, int capacidade){
 
 void *cpu1(void *t){
 	fd_set read_set;
-	char var1[100];
+	char var1[MAX_CHAR*2];
 	int counter = *((int *)t);
 	
 	sem_wait(mutex);
@@ -228,6 +238,12 @@ void *cpu1(void *t){
 	
 	while(1){
 		sem_wait(mutex);
+		
+		if(sh_mem->endingFlag == 1){
+			sh_mem->edgeList[counter].cpuState1 = ENDING;
+			sem_post(mutex);
+			break;
+		}
 		sh_mem->edgeList[counter].cpuState1 = AVAILABLE;
 		if(sh_mem->edgeList[counter].state == RUNNING){
 			
@@ -276,7 +292,7 @@ void *cpu1(void *t){
 
 void *cpu2(void *t){
 	fd_set read_set;
-	char var1[100];
+	char var1[MAX_CHAR*2];
 	int counter = *((int *)t);
 	
 	sem_wait(mutex);
@@ -287,6 +303,12 @@ void *cpu2(void *t){
 	
 	while(1){
 		sem_wait(mutex);
+		
+		if(sh_mem->endingFlag == 1){
+			sh_mem->edgeList[counter].cpuState2 = ENDING;
+			sem_post(mutex);
+			break;
+		}
 		sh_mem->edgeList[counter].cpuState2 = AVAILABLE;
 		if(sh_mem->edgeList[counter].state == RUNNING && sh_mem->highPerformanceFlag == 1){
 
@@ -335,7 +357,7 @@ void *cpu2(void *t){
 
 void edgeServer(int counter){
 	int i;
-	char var[100];
+	char var[MAX_CHAR*2];
 	pthread_t threads[NCPU];
 
 	sem_post(serverMutex);
@@ -344,7 +366,7 @@ void edgeServer(int counter){
 	pthread_create(&threads[1], NULL, cpu2, &counter);
 	
 	sem_wait(mutex);
-	sprintf(var, "%s IS READY", sh_mem->edgeList[counter].name)
+	sprintf(var, "%s IS READY", sh_mem->edgeList[counter].name);
 	logFile(var);
 	sh_mem->edgeList[counter].state = RUNNING;
 	message msg;
@@ -364,7 +386,7 @@ void edgeServer(int counter){
 
 		while(1){
 			sem_wait(mutex);
-			if(sh_mem->edgeList[counter].cpuState1 != BUSY && sh_mem->edgeList[counter].cpuState2 != BUSY)		
+			if(sh_mem->edgeList[counter].cpuState1 == AVAILABLE && sh_mem->edgeList[counter].cpuState2 == AVAILABLE)		
 				break;
 			sem_post(mutex);
 		}
@@ -373,7 +395,7 @@ void edgeServer(int counter){
 		strcpy(msg.mesg_text, "ready");
 		msgsnd(msgID, &msg, sizeof(message), 0);
 		
-		sprintf(var, "%s HAS STOPPED", sh_mem->edgeList[counter].name)
+		sprintf(var, "%s HAS STOPPED", sh_mem->edgeList[counter].name);
 		sem_post(mutex);
 		logFile(var);
 		
@@ -381,7 +403,7 @@ void edgeServer(int counter){
 		
 		sem_wait(mutex);
 		sh_mem->edgeList[counter].state = RUNNING;
-		sprintf(var, "%s IS BACK TO RUNNING", sh_mem->edgeList[counter].name)
+		sprintf(var, "%s IS BACK TO RUNNING", sh_mem->edgeList[counter].name);
 		sem_post(mutex);
 		logFile(var);
 	}
@@ -392,7 +414,7 @@ void edgeServer(int counter){
 }
 
 void removeTarefasImpo__Prio(){
-	char var[100];
+	char var[MAX_CHAR*2];
 	tasks* t = taskList;
 	int timeAtual = (int)time(NULL);
 	while(t != NULL){
@@ -556,18 +578,23 @@ int verificaCPU(){
 }
 
 void *dispatcher(void *t){
-	char var[100];
+	char var[MAX_CHAR*2];
+	int id;
 	logFile("STARTING DISPATCHER");
 	while(1){
+		
 		while(verificaExistirTarefas() == 0 && verificaCPU() == 0);
 		pthread_mutex_lock(&mutexFila);
 		tasks* t = taskList;
 		while(t != NULL){//esta sempre ordenado por prioridade por isso apenas temos que percorrer e encontrar uma que seja possivel fazer
 			if(t->data.id != -1){
-				if(taskValida(t) == 1 && tryDispatchTask(t) == 1)
+				id = t->data.id;
+				if(taskValida(t) == 1){
+					if(tryDispatchTask(t) == 1)
 						break;
+					}
 				else{
-					sprintf(var, "TASK %d REMOVED", t->data.id);
+					sprintf(var, "TASK %d REMOVED1", id);
 					logFile(var);
 				}
 			}
@@ -575,13 +602,14 @@ void *dispatcher(void *t){
 		}
 		pthread_mutex_unlock(&mutexFila);
 	}
+	pthread_exit(NULL);
 }
 
 void taskManager(){
 	logFile("PROCESS TASK_MANAGER CREATED");
 
 	int fd;
-	char str1[1000];
+	char str1[MAX_CHAR];
 	
 	timeout.tv_sec = 0;
 	timeout.tv_usec = 10;
@@ -629,11 +657,10 @@ void taskManager(){
 	
 	while(1){
 		fd = open(task_pipe, O_RDONLY);	
-		read(fd, str1, 1000);
+		read(fd, str1, MAX_CHAR);
 		if(strcmp(str1, "EXIT") == 0){
 			logFile("EXIT COMMAND RECEIVED");
-			logFile("SIMULATOR CLOSING");
-			cleanup();
+			kill(systemManagerPID, SIGINT);
 		}
 		else if(strcmp(str1, "STATS") == 0){
 			logFile("STATS COMMAND RECEIVED");
@@ -652,6 +679,8 @@ void taskManager(){
 		
 			printf("TOTAL DE TAREFAS NAO EXECUTADAS: %d\n", sh_mem->totalTarefasNaoRealizadas);
 			sleep(5);//para dar tempo para ler
+			
+			sem_post(mutex);
 		}
 		else{
 			int id = atoi(strtok(str1, ";"));
@@ -661,6 +690,13 @@ void taskManager(){
 			insertFila(id, n_inst, tMax);
 			pthread_cond_signal(&scheduler_cs);
 			pthread_mutex_unlock(&mutexFila);
+			sem_wait(mutex);
+			if(sh_mem->endingFlag == 1){
+				close(fd);
+				sem_post(mutex);
+				break;
+			}
+			sem_post(mutex);
 		}
 		close(fd);
 	}
@@ -758,6 +794,13 @@ void maintenanceManager(){
 	logFile("MAINTENANCE MANAGER HAS BEGUN STOPPING SERVERS");
 	while(1){
 		for(int i = 0; i < totalServers; i++){
+			sem_wait(mutex);
+			if(sh_mem->endingFlag == 1){
+				sem_post(mutex);
+				exit(0);
+			}
+			sem_post(mutex);
+			
 			strcpy(msg.mesg_text, "PrepareStop");
 			msg.mtype = i+1;
 			msgsnd(msgID, &msg, sizeof(message), 0);//mensagem para o servidor com o aviso de que vai haver uma intervencao
@@ -778,10 +821,63 @@ void maintenanceManager(){
 	exit(0);
 }
 
+int cpuEnding(){
+	for(int i = 0; i < sh_mem->nEdgeServers; i++){
+		if(sh_mem->edgeList[i].cpuState1 != ENDING)
+			return -1;
+		if(sh_mem->edgeList[i].cpuState2 != ENDING)
+			return -1;	
+	}
+	return 0;
+}
+
+void checkTasks(){
+	pthread_mutex_lock(&mutexFila);
+	tasks* t;
+	char var[MAX_CHAR*2];
+	while(taskList != NULL){
+		if(taskList->data.id != -1){
+			sprintf(var, "TASK %d NOT EXECUTED", t->data.id);
+			logFile(var);
+			sem_wait(mutex);
+			sh_mem->totalTarefasNaoRealizadas++;
+			sem_post(mutex);
+		}
+		t=taskList;
+		taskList = taskList->next;
+		free(t);
+	}
+	pthread_mutex_unlock(&mutexFila);
+}
+
+
+
+
 void sigCleanup(){
 	if((int)systemManagerPID == (int)getpid()){
 		logFile("SIGNAL SIGINT RECEIVED");
-	
+		
+		sem_wait(mutex);
+		sh_mem->endingFlag = 1;
+		sem_post(mutex);
+		logFile("SIMULATOR WAITING FOR LAST TASKS TO FINISH");
+		while(1){
+			sem_wait(mutex);
+			if(cpuEnding() == 0){
+				sem_post(mutex);
+				break;
+			}
+			sem_post(mutex);
+		}
+		checkTasks();
+		
+		stats();
+		
+		for(int i = 0; i < sh_mem->nEdgeServers; i++){
+			close(sh_mem->edgeList[i].channel[1]);
+			close(sh_mem->edgeList[i].channel[0]);
+		}
+		
 		msgctl(msgID, IPC_RMID, 0);
 		shmctl(shmid, IPC_RMID, 0);
 	
@@ -799,24 +895,7 @@ void sigCleanup(){
 	}
 }
 
-void cleanup(){//falta dar free a memoria da fila de tasks
-	logFile("SIGNAL SIGINT RECEIVED");
-	
-	msgctl(msgID, IPC_RMID, 0);
-	shmctl(shmid, IPC_RMID, 0);
-	
-	sem_close(mutex);
-	sem_unlink("MUTEX");
-	sem_close(serverMutex);
-	sem_unlink("SERVERMUTEX");
-	//sem_close(logSem);
-	//sem_unlink("LOGSEM");
-	pthread_mutex_destroy(&mutexFila);
-	pthread_cond_destroy(&scheduler_cs);
-	logFile("SIMULATOR CLOSING");
-	kill(0, SIGTERM);
-	exit(0);
-}
+
 
 void stats(){
 	if((int)systemManagerPID == (int)getpid()){
@@ -861,14 +940,14 @@ void systemManager(char *filename){
 	if((shmid = shmget(IPC_PRIVATE, sizeof(shm_struct), IPC_CREAT|0776)) < 0){
 		logFile("ERROR CREATING SHARED MEMORY");
 		perror("Erro ao criar a memoria partilhada");
-		cleanup();
+		sigCleanup();
 		exit(1);
 	}
 	
 	if((sh_mem = (shm_struct*) shmat(shmid, NULL, 0)) < 0){
 		logFile("ERROR MAPING SHARED MEMORY");
 		perror("Erro ao mapear a memoria partilhada");
-		cleanup();
+		sigCleanup();
 		exit(1);
 	}
 	
@@ -893,19 +972,19 @@ void systemManager(char *filename){
 	if(a == -1){
 		logFile("ERROR READING CONFIG FILE");
 		perror("Erro ao ler o ficheiro de configuracoes");
-		cleanup();
+		sigCleanup();
 		exit(1);
 	}
 	if(a == -2){
 		logFile("INVALID CONFIG FILE");
 		perror("Ficheiro de configuracoes invalido");
-		cleanup();
+		sigCleanup();
 		exit(1);
 	}
 	if(a == -3){
 		logFile("INVALID NUMBER OF SERVERS");
 		perror("Numero de servers ultrapassa o maximo estabelecido");
-		cleanup();
+		sigCleanup();
 		exit(1);
 	}
 
@@ -919,12 +998,13 @@ void systemManager(char *filename){
 	msgID = msgget(IPC_PRIVATE, IPC_CREAT|0777);
 	if(msgID < 0){
 		perror("Creating message queue");
-		cleanup();
+		sigCleanup();
 		exit(0);
 	}
 	
 	
 	if(fork() == 0){
+		
 		taskManager();
 		exit(0);
 	}
@@ -949,15 +1029,14 @@ int main(){
 	char comando[100];
 	while(1){
 		fgets(comando, 100, stdin);
-		//char *token = strtok(comando, "\n");
-		//const char s[2] = " ";
-		//char *check_comando = strtok(token, s);
-		//if(strcmp(check_comando, "offload_simulator") == 0){
+		char *token = strtok(comando, "\n");
+		const char s[2] = " ";
+		char *check_comando = strtok(token, s);
+		if(strcmp(check_comando, "offload_simulator") == 0){
 			
-			//char *filename = strtok(NULL, s);
-			char *filename = "config_file.txt";//
+			char *filename = strtok(NULL, s);
+			//char *filename = "config_file.txt";
 			systemManager(filename);
-		//}
-	}
-	//cleanup();	
+		}
+	}	
 }
